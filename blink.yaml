@@ -1,0 +1,215 @@
+esphome:
+  name: blink
+  friendly_name: blink
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+
+api:
+  encryption:
+    key: "hPzutiDszGyqf4KTHR6HNc4MXjsrEY8zbMIR8wVhUIM="
+
+ota:
+  - platform: esphome
+    password: "98a9eec4ba3b51efaf744667b6f77168"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  ap:
+
+
+captive_portal:
+
+globals:
+  # --- Air Purifier Globals ---
+  - id: purifier_fan_speed_percent
+    type: float
+    restore_value: yes
+    initial_value: "0.0"
+  - id: pm25_current_value
+    type: float
+    restore_value: no
+    initial_value: "15.0"
+
+  # --- General Environment Sensor Globals ---
+  - id: co2_current_value
+    type: float
+    initial_value: "500.0"
+  - id: temperature_current_value
+    type: float
+    initial_value: "22.0"
+  - id: humidity_current_value
+    type: float
+    initial_value: "50.0"
+
+  # --- Air Conditioner Globals ---
+  - id: ac_is_on
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+  - id: ac_target_temperature
+    type: float
+    restore_value: yes
+    initial_value: "22.0" 
+
+# --- Sensors Section ---
+sensor:
+  # CO2 Sensor
+  - platform: template
+    name: "CO2"
+    unit_of_measurement: "ppm"
+    device_class: carbon_dioxide
+    state_class: measurement
+    id: co2_sensor_sim
+    lambda: |-
+      float current_co2 = id(co2_current_value);
+      float fan_speed = id(purifier_fan_speed_percent);
+
+      // Simulate CO2 increase over time
+      // Decrease CO2 faster if purifier is on and fan speed is high (simulating ventilation)
+      if (fan_speed < 50.0) {
+        current_co2 += random_float() * 5.0;
+        if (current_co2 > 2000.0) current_co2 = 2000.0;
+      } else { // Purifier on and high speed
+        current_co2 -= random_float() * (fan_speed / 15.0); 
+        if (current_co2 < 400.0) current_co2 = 400.0;
+      }
+
+      id(co2_current_value) = current_co2;
+      return current_co2;
+    update_interval: 10s
+
+  # Temperature Sensor
+  - platform: template
+    name: "Temperature"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    id: temp_sensor_sim
+    lambda: |-
+      float current_temp = id(temperature_current_value);
+      bool ac_on = id(ac_is_on);
+      float target_temp = id(ac_target_temperature);
+
+      // Simulate temperature fluctuation
+      if (ac_on) {
+        if (current_temp > target_temp + 0.5) {
+          current_temp -= random_float() * 0.3;
+        } else if (current_temp < target_temp - 0.5) {
+          current_temp += random_float() * 0.1;
+        } else {
+          current_temp += (random_float() - 0.5) * 0.05;
+        }
+      } else {
+        current_temp += (random_float() - 0.5) * 0.2;
+      }
+
+      if (current_temp > 25.0 && !ac_on) current_temp = 25.0;
+      if (current_temp < 18.0 && ac_on) current_temp = 18.0;
+
+      id(temperature_current_value) = current_temp;
+      return current_temp;
+    update_interval: 10s
+
+  # Humidity Sensor
+  - platform: template
+    name: "Humidity"
+    unit_of_measurement: "%"
+    device_class: humidity
+    state_class: measurement
+    id: humidity_sensor_sim
+    lambda: |-
+      float current_humidity = id(humidity_current_value);
+      bool ac_on = id(ac_is_on);
+
+      // Simulate humidity fluctuation
+      if (ac_on) {
+        current_humidity -= random_float() * 0.3;
+        if (current_humidity < 35.0) current_humidity = 35.0;
+      } else {
+        current_humidity += (random_float() - 0.5) * 0.5;
+        if (current_humidity > 65.0) current_humidity = 65.0;
+      }
+      if (current_humidity < 40.0 && !ac_on) current_humidity = 40.0;
+
+      id(humidity_current_value) = current_humidity;
+      return current_humidity;
+    update_interval: 30s
+
+  # --- Air Purifier Specific Sensors ---
+  - platform: template
+    name: "Air Purifier PM2.5"
+    unit_of_measurement: "µg/m³"
+    device_class: pm25
+    state_class: measurement
+    id: purifier_pm25_sensor_sim
+    lambda: |-
+      float current_pm25 = id(pm25_current_value);
+      float fan_speed = id(purifier_fan_speed_percent);
+
+      // Simulate air quality degradation over time if purifier is off
+      if (fan_speed < 50.0) {
+        current_pm25 += random_float() * 0.5;
+        if (current_pm25 > 80.0) current_pm25 = 80.0;
+      } else {
+        current_pm25 -= random_float() * (fan_speed / 20.0);
+        if (current_pm25 < 5.0) current_pm25 = 5.0;
+      }
+
+      id(pm25_current_value) = current_pm25;
+      return current_pm25;
+    update_interval: 10s
+
+# --- Air Purifier Control ---
+number:
+  - platform: template
+    name: "Air Purifier Fan Speed"
+    id: air_purifier_fan_speed_control_sim
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: slider
+    set_action:
+      lambda: |-
+        id(purifier_fan_speed_percent) = x;
+        id(air_purifier_fan_speed_control_sim).publish_state(x);
+    # The state of this number component in Home Assistant reflects the current fan speed
+    lambda: |-
+      return id(purifier_fan_speed_percent);
+
+  - platform: template
+    name: "AC Target Temperature"
+    id: ac_target_temperature_control_sim
+    min_value: 18
+    max_value: 25
+    step: 0.5
+    unit_of_measurement: "°C"
+    mode: slider
+    set_action:
+      lambda: |-
+        id(ac_target_temperature) = x;
+        id(ac_target_temperature_control_sim).publish_state(x); 
+    lambda: |-
+      return id(ac_target_temperature);
+
+# --- Air Conditioner Control ---
+switch:
+  - platform: template
+    name: "Air Conditioner Power"
+    id: ac_power_switch_sim
+    optimistic: true
+    turn_on_action:
+      - lambda: |-
+          id(ac_is_on) = true;
+    turn_off_action:
+      - lambda: |-
+          id(ac_is_on) = false;
+    lambda: |-
+      return id(ac_is_on);
